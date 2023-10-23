@@ -1,0 +1,140 @@
+---
+title: "EI-EP06-respuesta-equipo-i"
+author: "Grupo 6"
+date: "2023-10-10"
+output: html_document
+---
+
+Enunciado: Un equipo de investigadores del área de interacción humano-información está estudiando si el área temática y el nivel de dificultad del problema de información influyen en el tiempo (en segundos) que toma un usuario en formular una consulta de búsqueda para resolver dicho problema. Para ello, han reclutado a un grupo de participantes voluntarios, asignados aleatoriamente a distintos grupos. Cada participante debe resolver tres problemas de información con diferentes niveles de dificultad: baja, media y alta. A su vez, cada grupo debe resolver problemas relacionados a una temática diferente. Los datos recolectados contemplan las siguientes variables:
+
+En este momento, los investigadores buscan determinar si existen diferencias en el tiempo que tardan los usuarios en formular consultas para problemas con diferente nivel de dificultad en el área de leyes.
+
+Es por esto que podemos plantear las siguientes hipótesis.
+
+$$
+H_{0}: \text{El tiempo promedio que tardan los usuarios que estudian leyes en distintas dificultades de problemas es igual}
+$$
+
+$$
+H_{a}: \text{El tiempo promedio que tardan los usuarios que estudian leyes es distinto para al menos una dificultad}
+$$
+
+Primero se hace un acercamiento a los datos y se exportan las librerías que se usarán:
+
+```{r}
+
+library(conflicted)
+conflict_prefer("filter", "dplyr")
+
+library(tidyverse)
+library(ggpubr)
+library(dplyr)
+library(ez)
+library(nlme)
+library(emmeans)
+
+datos <- read.csv2("EP06 Datos.csv", sep = ",")
+```
+
+Luego se filtran los datos según el interés, primero se obtienen todos los datos del área de Leyes y estos se separan en distintos data.frame según su dificultad:
+
+```{r}
+datos <- datos %>% filter(area == "Leyes" )
+baja <- datos %>% filter(dificultad == "Baja" ) %>% pull(tiempo)
+media <- datos %>% filter(dificultad == "Media" ) %>% pull(tiempo)
+alta <- datos %>% filter(dificultad == "Alta" ) %>% pull(tiempo)
+```
+
+### Análisis de condiciones
+
+1.  La escala con que se mide la variable dependiente tiene las propiedades de una escala de intervalos iguales.
+
+Esta condición se verifica de manera rápida, ya que la variable esta medida en tiempo, y esta tiene una escala de intervalos iguales siendo una escala de razón.
+
+2.  Las mediciones son independientes al interior de cada grupo
+
+Las mediciones son independientes en cada grupo, puesto que cada persona dentro de cada uno de los grupos son personas distintas que fueron seleccionadas al azar.
+
+3.  Se puede suponer razonablemente que la(s) población(es) de origen sigue(n) una distribución normal
+
+A continuación, se expresan los datos en formato largo y se muestran los gráficos Q-Q para cada uno de los grupos, comprobando el supuesto de normalidad.
+
+```{r}
+data <- data.frame(baja, media, alta)
+
+data <- data %>% pivot_longer(c("baja", "media", "alta"),
+                              names_to = "dificultad",
+                              values_to = "tiempo")
+
+data[["dificultad"]] <- factor(data[["dificultad"]])
+data[["instancia"]] <- factor(1:row(data))
+
+g <- ggqqplot(data, x = "tiempo" ,
+              y = " area " )
+g <- g + facet_wrap(~ dificultad )
+g <- g + rremove("x.ticks") + rremove("x.text")
+g <- g + rremove("y.ticks") + rremove("y.text")
+g <- g + rremove("axis.title")
+print(g)
+```
+
+4.  La matriz de varianzas-covarianzas es esférica.
+
+```{r}
+baja <- datos %>% filter(dificultad == "Baja" ) %>% pull(tiempo)
+media <- datos %>% filter(dificultad == "Media" ) %>% pull(tiempo)
+alta <- datos %>% filter(dificultad == "Alta" ) %>% pull(tiempo)
+
+instancia <- factor(1:200)
+
+
+data <- data.frame(instancia, baja, media, alta)
+
+
+data <- data %>% pivot_longer(c("baja", "media", "alta"),
+                              names_to = "dificultad",
+                              values_to = "tiempo")
+
+data[["dificultad"]] <- factor(data[["dificultad"]])
+
+alpha = 0.05
+test <- ezANOVA(data = data, dv = tiempo, within = dificultad, wid = instancia, return_aov = TRUE)
+
+print(test[["Mauchly's Test for Sphericity"]])
+
+```
+
+Se puede notar que gracias a la prueba de esfericidad que viene dentro de $ezANOVA()$ se obtiene un p value de 0.1274044, lo que es mayor a un 0.05 demostrando que no hay evidencia suficiente para rechazar la hipótesis nula, es decir, se puede decir con un 95% de confianza que la matriz de varianzas-covarianzas es esférica.
+
+Con las condiciones listas, se procede a revisar el resultado de la prueba $ezANOVA()$ :
+
+```{r}
+print(test)
+```
+
+Dado el resultado obtenido por la prueba ezANOVA, se puede observar que el p-value otorgado es menor a nuestro nivel de significancia, es decir, p-value = 4.65e-26 \< alpha = 0.05. En consecuencia, se puede rechazar la hipótesis nula con un nivel de confiabilidad del 95%, a favor de la hipótesis alternativa. Es decir, el tiempo que tardan los usuarios que estudian leyes es distinto para al menos una dificultad.
+
+Con estos resultados es pertinente realizar un procedimiento post-hoc, en particular se realizará la prueba HSD de Tukey.
+
+Primero se crea el modelo mixto:
+
+```{r}
+mixto <- lme(tiempo ~ dificultad, data = data,random = ~1|instancia)
+print(mixto)
+```
+
+Luego se calcula la media para cada una de las variables dependientes con su respectivo intervalo de confianza (lower.CL y upper.CL)
+
+```{r}
+medias <- emmeans(mixto, "dificultad")
+print(medias)
+```
+
+Por último, se estiman las medias de las diferencias para contrastes entre pares, en este se puede ver a cada uno con su p-value y su error estándar:
+
+```{r}
+tukey <- pairs(medias, adjust = "tukey")
+print(tukey)
+```
+
+Se puede notar que para cada uno de los contrastes se tiene un p-value menor al 0.05 de significancia, por lo tanto, se rechaza la hipótesis nula en favor de la alternativa con un 95% de confianza, es decir, todas las dificultades tienen un tiempo de respuesta distinto para los estudiantes de el área de leyes.
